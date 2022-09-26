@@ -545,13 +545,6 @@ class I2C_CP2112(object):
 if __name__ == "__main__":
     # TestAll()
     CP2112_device = I2C_CP2112(0,1)
-    #CP2112_device.I2C_READ(180, 1)
-    CP2112_device.I2C_READ(0x80, 60)     # 6 data in buf
-    #CP2112_device.I2C_READ(0x7F, 4)   # no data in buf
-    
-    address = 0x7F
-    a = bytes([address, address])
-    #print(a)
-    #print(str(a))
-    b = str([address, address])
-    #print(b)
+    CP2112_device.I2C_PAGE_SELECT([0x0])
+    CP2112_device.I2C_READ(0x00, 8)
+    CP2112_device.I2C_READ(0x80, 8)
