@@ -291,11 +291,6 @@ class HidSmbusDevice:
     def AddressReadRequest(self, address=2, count=64, offset_size=2, offset=b'\x00\x00'):
         buf = ct.create_string_buffer(bytes(offset), size=16)
         _DLL.HidSmbus_AddressReadRequest(self.handle, address, count, offset_size, buf)
-        print("step1 type(offset) = ", type(offset))
-        print("step1 len(offset) = ", len(offset))
-        print("step1 bytes(offset) = ", bytes(offset))
-        print("step1 type(bytes(offset)) = ", type(bytes(offset)))
-        print("step1 len(bytes(offset)) = ", len(bytes(offset)))
 
     # HidSmbus_ForceReadResponse(HID_SMBUS_DEVICE device, WORD numBytesToRead);
     def ForceReadResponse(self, count=64):
@@ -307,10 +302,10 @@ class HidSmbusDevice:
         n = ct.c_ulong(0)
         try:
             _DLL.HidSmbus_GetReadResponse(self.handle, ct.byref(self._S0), buf, count, ct.byref(n))
-            print("step3 numBytesRead(Valid) = ", n)
-            print("step3 Status = ", self._S0)
-            print("step3 type(buf.value) = ", type(buf.value))
-            print("step3 len(buf.value) = ", len(buf.value))
+            if(n.value >= 1):
+                # print("buf.value = ", buf.value)      # Add by Lance
+                # print("buf.value = ", buf[n.value-1]) # Add by Lance
+                return buf[n.value-1]                   # Add by Lance, fix read 0x00 fail.
         except HidSmbusError as e:
             # Ignore timeout, return the data that was read
             if e.status != 0x12:
@@ -472,13 +467,15 @@ class I2C_CP2112(object):
     def __init__(self, DevIndex = 0, print_debug = 0, slave_addr = 0xA0, speed = 400):
         # Para Init
         self.slave_addr = slave_addr
-        self.autoReadRespond = True# If disabled, the user must call HidSmbus_ForceReadResponse() before read response interrupt reports
-                                    # will be sent to the host. The default is FALSE (0).
+        self.autoReadRespond = False    # If disabled, the user must call HidSmbus_ForceReadResponse() before read response
+                                        # interrupt reports will be sent to the host. The default is FALSE (0).
+                                        # CP2112 errata said auto has some issue, so need to configure false.
         self.write_timeout = 100    # 0 - 1000
         self.read_timeout = 100     # 0 - 1000
         self.sclLow_timeout = False
-        self.transfer_Retries = False
+        self.transfer_Retries = 0
         self.print_debug = print_debug
+        self.speed = speed
 
         # Para I2C READ
         self.MaxbufferSize = 61
@@ -492,41 +489,44 @@ class I2C_CP2112(object):
         try:
             self.smb = HidSmbusDevice()
             self.smb.Open(DevIndex)
-            self.smb.SetSmbusConfig(speed*1000, self.slave_addr, self.autoReadRespond, self.write_timeout, self.read_timeout,
+            self.smb.SetSmbusConfig(self.speed*1000, 2, self.autoReadRespond, self.write_timeout, self.read_timeout,
                                     self.sclLow_timeout, self.transfer_Retries)
+            print("Config = ", self.smb.GetSmbusConfig())
         except HidSmbusError as e:
             print("Device Error:", e, "-", hex(e.status))
             self.smb.Close()
 
-    def I2C_READ(self, address, number):
-        rx_buff = []
-        timeout = 0
-        # Step 1
-        self.smb.AddressReadRequest(self.slave_addr, number, self.addr_size, [address])
-        while True:
-            Status = []
+    def Check_HidSmbus_Request_Status(self):
+        Status = []
+        while 1:
             self.smb.TransferStatusRequest()
-            Status += self.smb.GetTransferStatusResponse()
-            print("step1 Status = ", Status)
-            if Status[0] == HID_SMBUS_S0.COMPLETE: break
+            Status = self.smb.GetTransferStatusResponse()
+            # print("Status = ", Status)
+            if Status[0] == HID_SMBUS_S0.COMPLETE: return Status[3]
             if Status[0] == HID_SMBUS_S0.BUSY:
-                if Status[1] == HID_SMBUS_S1.BUSY_ADDRESS_NACKED: break
+                if Status[1] == HID_SMBUS_S1.BUSY_ADDRESS_NACKED: return 0
             else:
                 return 0
-        # Step 2
-        if self.autoReadRespond == False:
-            print("step2 ForceRead number = ", number)
-            self.smb.ForceReadResponse(number)
-        # Step 3
-        while True:
+
+    def I2C_READ(self, address, number):
+        rx_buff = []
+        timeout_count = 0
+        # Step 1
+        self.smb.AddressReadRequest(self.slave_addr, number, self.addr_size, [address])
+        if(number != self.Check_HidSmbus_Request_Status()): return
+        
+        while 1:
+            # Step 2
+            self.smb.ForceReadResponse(1)
+            # Step 3
             rx_buff += self.smb.GetReadResponse()
-            time.sleep(0.05)
-            if(len(rx_buff) >= number):break
-            break
+            if(len(rx_buff) >= number): break
+            if(timeout_count >= number + 10): break
+            timeout_count += 1
 
         if self.print_debug:
-            print ("Read byte 0x%02X value = " %address + str.join("", ("0x%02X, " %a for a in rx_buff)))
-        return rx_buff
+            print ("Read byte 0x%02X value = " %address + str.join("", ("0x%02X, " %a for a in rx_buff[:number])))
+        return rx_buff[:number]
 
     def I2C_WRITE(self, address, data, write_delay = 0):
         self.write_buffer = []
