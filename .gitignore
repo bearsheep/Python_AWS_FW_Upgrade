@@ -1,0 +1,25 @@
+##################################
+#    .gitignore 
+#
+#    Create on      : 2019/05/24
+#    Author         : Lance_Hsu
+#    Version        : v3
+#    Release History: v1 - 20190524: Initial python ignore file
+#                     v2 - 20200312: Add *.xlsx and *.pyc
+#                     v3 - 20200602: Add #VSCode ignore
+#
+##################################
+
+#Keil5 build objects
+.idea/
+venv/
+
+# Other
+*.bak
+*.xlsx
+*.pyc
+
+#VSCode
+build/
+dist/
+logs/
